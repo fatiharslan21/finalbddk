@@ -1,0 +1,8 @@
+chromium
+chromium-driver
+libnss3
+libgconf-2-4
+libfontconfig1
+libgl1-mesa-glx
+libxi6
+libx11-xcb1
