@@ -1,11 +1,13 @@
 import streamlit as st
 import pandas as pd
 from selenium import webdriver
+# --- GEREKLİ KÜTÜPHANELER ---
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.firefox import GeckoDriverManager  # YENİ EKLENDİ
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -51,26 +53,32 @@ VERI_KONFIGURASYONU = {
 
 def get_driver():
     """
-    AKILLI DRIVER SEÇİCİ:
-    - Bilgisayarında (Windows) çalışıyorsa -> CHROME kullanır (Kurmana gerek kalmaz).
-    - Sunucuda (Linux) çalışıyorsa -> FIREFOX kullanır (Hatasız çalışır).
+    HİBRİT DRIVER:
+    - Linux (Cloud): Firefox kullanır (Driver'ı Python indirir).
+    - Windows (Sen): Chrome kullanır.
     """
 
-    # DURUM 1: STREAMLIT CLOUD (LINUX) - FIREFOX KULLAN
+    # DURUM 1: STREAMLIT CLOUD (LINUX) - FIREFOX
     if sys.platform == "linux":
         options = FirefoxOptions()
         options.add_argument("--headless")
+        # Firefox'un sistemdeki yerini gösteriyoruz
         options.binary_location = "/usr/bin/firefox"
-        service = FirefoxService("/usr/bin/geckodriver")
+
+        # Sürücüyü (GeckoDriver) Python otomatik indirsin
+        # Cache hatasını önlemek için try-except
+        try:
+            service = FirefoxService(GeckoDriverManager().install())
+        except:
+            # Yedek yöntem: Mevcutsa sistemdekini kullan (ama genelde yukarıdaki çalışır)
+            service = FirefoxService("/usr/local/bin/geckodriver")
+
         return webdriver.Firefox(service=service, options=options)
 
-    # DURUM 2: SENİN BİLGİSAYARIN (WINDOWS) - CHROME KULLAN
+    # DURUM 2: SENİN BİLGİSAYARIN (WINDOWS) - CHROME
     else:
         options = ChromeOptions()
-        # Bilgisayarında çalışırken tarayıcıyı görmek istersen "headless" satırını silebilirsin
-        # options.add_argument("--headless")
         options.add_argument("--start-maximized")
-        # ChromeDriverManager otomatik olarak senin Chrome sürümünü bulur
         service = ChromeService(ChromeDriverManager().install())
         return webdriver.Chrome(service=service, options=options)
 
@@ -83,8 +91,7 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
         driver = get_driver()
         driver.get("https://www.bddk.org.tr/bultenaylik")
 
-        # Bekleme süresi
-        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "ddlYil")))
+        WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.ID, "ddlYil")))
 
         bas_idx = AY_LISTESI.index(bas_ay)
         bit_idx = AY_LISTESI.index(bit_ay)
@@ -102,12 +109,12 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
 
                 status_container.info(f"⏳ Veri Çekiliyor: **{donem}**")
 
-                # JAVASCRIPT İLE SEÇİM (Hem Chrome Hem Firefox Uyumlu)
+                # JS Seçimi
                 driver.execute_script(f"""
                     $('#ddlYil').val('{yil}').trigger('chosen:updated').trigger('change');
                     $('#ddlAy').val('{ay_str}').trigger('chosen:updated').trigger('change');
                 """)
-                time.sleep(2.0)
+                time.sleep(2.5)  # Bekleme süresi
 
                 for taraf in secilen_taraflar:
                     driver.execute_script(f"""
@@ -120,7 +127,7 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                         }}
                         $(t).trigger('chosen:updated').trigger('change');
                     """)
-                    time.sleep(1.0)
+                    time.sleep(1.2)
 
                     for veri in secilen_veriler:
                         conf = VERI_KONFIGURASYONU[veri]
@@ -138,7 +145,7 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                 progress_bar.progress(current_step / max(1, total_steps))
 
     except Exception as e:
-        st.error(f"BİR HATA OLUŞTU: {e}")
+        st.error(f"HATA OLUŞTU: {e}")
     finally:
         if driver: driver.quit()
 
@@ -161,7 +168,7 @@ with st.sidebar:
     st.markdown("---")
     btn = st.button("🚀 BAŞLAT")
 
-st.title("🏦 BDDK Analiz (Chrome/Firefox Hibrit)")
+st.title("🏦 BDDK Analiz")
 
 if btn:
     if not secilen_taraflar or not secilen_veriler:
