@@ -1,8 +1,11 @@
 import streamlit as st
 import pandas as pd
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -47,28 +50,29 @@ VERI_KONFIGURASYONU = {
 
 
 def get_driver():
-    """Çökme Önleyici Maksimum Ayarlar"""
-    chrome_options = Options()
+    """
+    AKILLI DRIVER SEÇİCİ:
+    - Bilgisayarında (Windows) çalışıyorsa -> CHROME kullanır (Kurmana gerek kalmaz).
+    - Sunucuda (Linux) çalışıyorsa -> FIREFOX kullanır (Hatasız çalışır).
+    """
 
-    # --- TEMEL HEADLESS AYARLARI ---
-    chrome_options.add_argument("--headless=new")  # Eğer hata verirse sadece "--headless" yapın
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-features=NetworkService")
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-    chrome_options.add_argument('--ignore-certificate-errors')
-
+    # DURUM 1: STREAMLIT CLOUD (LINUX) - FIREFOX KULLAN
     if sys.platform == "linux":
-        # Streamlit Cloud Yolları
-        chrome_options.binary_location = "/usr/bin/chromium"
-        service = Service("/usr/bin/chromedriver")
-    else:
-        # Windows (Local)
-        service = Service()
+        options = FirefoxOptions()
+        options.add_argument("--headless")
+        options.binary_location = "/usr/bin/firefox"
+        service = FirefoxService("/usr/bin/geckodriver")
+        return webdriver.Firefox(service=service, options=options)
 
-    return webdriver.Chrome(service=service, options=chrome_options)
+    # DURUM 2: SENİN BİLGİSAYARIN (WINDOWS) - CHROME KULLAN
+    else:
+        options = ChromeOptions()
+        # Bilgisayarında çalışırken tarayıcıyı görmek istersen "headless" satırını silebilirsin
+        # options.add_argument("--headless")
+        options.add_argument("--start-maximized")
+        # ChromeDriverManager otomatik olarak senin Chrome sürümünü bulur
+        service = ChromeService(ChromeDriverManager().install())
+        return webdriver.Chrome(service=service, options=options)
 
 
 def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status_container):
@@ -77,9 +81,9 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
 
     try:
         driver = get_driver()
-        driver.set_page_load_timeout(30)  # 30 saniye zaman aşımı
         driver.get("https://www.bddk.org.tr/bultenaylik")
 
+        # Bekleme süresi
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "ddlYil")))
 
         bas_idx = AY_LISTESI.index(bas_ay)
@@ -95,17 +99,17 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
             for ay_i in range(start_m, end_m + 1):
                 ay_str = AY_LISTESI[ay_i]
                 donem = f"{ay_str} {yil}"
+
                 status_container.info(f"⏳ Veri Çekiliyor: **{donem}**")
 
-                # Tarih Değiştir
+                # JAVASCRIPT İLE SEÇİM (Hem Chrome Hem Firefox Uyumlu)
                 driver.execute_script(f"""
                     $('#ddlYil').val('{yil}').trigger('chosen:updated').trigger('change');
                     $('#ddlAy').val('{ay_str}').trigger('chosen:updated').trigger('change');
                 """)
-                time.sleep(1.5)
+                time.sleep(2.0)
 
                 for taraf in secilen_taraflar:
-                    # Taraf Seç
                     driver.execute_script(f"""
                         var t = document.getElementById('ddlTaraf');
                         for(var i=0; i<t.options.length; i++){{
@@ -121,10 +125,8 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                     for veri in secilen_veriler:
                         conf = VERI_KONFIGURASYONU[veri]
                         try:
-                            # Sekme Değiştir
                             driver.execute_script(f"document.getElementById('{conf['tab']}').click();")
-                            time.sleep(0.3)
-                            # Veri Al
+                            time.sleep(0.5)
                             xpath = f"//tr[contains(., '{conf['row_text']}')]//td[contains(@aria-describedby, '{conf['col_id']}')]"
                             element = driver.find_element(By.XPATH, xpath)
                             val = float(element.text.replace('.', '').replace(',', '.')) if element.text else 0.0
@@ -136,12 +138,7 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
                 progress_bar.progress(current_step / max(1, total_steps))
 
     except Exception as e:
-        st.error(f"HATA OLUŞTU: {str(e)}")
-        # Debug için hatayı ekrana bas
-        if sys.platform == "linux":
-            st.write("Debug Info:")
-            st.write(f"Chromium Path Exists: {os.path.exists('/usr/bin/chromium')}")
-            st.write(f"Chromedriver Path Exists: {os.path.exists('/usr/bin/chromedriver')}")
+        st.error(f"BİR HATA OLUŞTU: {e}")
     finally:
         if driver: driver.quit()
 
@@ -152,7 +149,6 @@ def scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veri
 with st.sidebar:
     st.title("🎛️ PANEL")
     st.markdown("---")
-    st.subheader("🗓️ Tarih Aralığı")
     c1, c2 = st.columns(2)
     bas_yil = c1.number_input("Başlangıç Yılı", 2024, 2030, 2024)
     bas_ay = c2.selectbox("Başlangıç Ayı", AY_LISTESI, index=0)
@@ -165,11 +161,11 @@ with st.sidebar:
     st.markdown("---")
     btn = st.button("🚀 BAŞLAT")
 
-st.title("🏦 BDDK Analiz")
+st.title("🏦 BDDK Analiz (Chrome/Firefox Hibrit)")
 
 if btn:
     if not secilen_taraflar or not secilen_veriler:
-        st.error("Eksik seçim yaptınız.")
+        st.error("Eksik seçim.")
     else:
         status = st.empty()
         df = scrape_bddk(bas_yil, bas_ay, bit_yil, bit_ay, secilen_taraflar, secilen_veriler, status)

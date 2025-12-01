@@ -1,5 +1,6 @@
 streamlit
 pandas
-selenium==4.18.1
+selenium
 plotly
 openpyxl
+webdriver-manager

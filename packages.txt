@@ -1,12 +1,2 @@
-chromium
-chromium-driver
-libnss3
-libgconf-2-4
-libfontconfig1
-libgl1-mesa-glx
-libxi6
-libx11-xcb1
-libgbm1
-libasound2
-libatk1.0-0
-libgtk-3-0
+firefox-esr
+geckodriver
